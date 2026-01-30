@@ -30,7 +30,7 @@ class CategoriasCollector(BaseCollector):
             "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
         }
     
-    def build_payload(self, pagina: int = 1, registros_por_pagina: int = 50, **kwargs) -> Dict[str, Any]:
+    def build_payload(self, pagina: int = 1, registros_por_pagina: int = 200, **kwargs) -> Dict[str, Any]:
         """
         Constrói o payload conforme documentação oficial da API Omie.
         https://app.omie.com.br/api/v1/geral/categorias/

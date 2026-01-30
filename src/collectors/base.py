@@ -77,6 +77,7 @@ class BaseCollector(IDataCollector, ABC):
         """
         # Mapeamento de chaves comuns da API Omie
         possible_keys = [
+            "cadastros",  # API Omie: oportunidades, etapas faturamento, etc.
             "clientes_cadastro",
             "produto_servico_cadastro",
             "servicos_cadastro",
@@ -143,8 +144,8 @@ class BaseCollector(IDataCollector, ABC):
         """
         all_data = []
         pagina = kwargs.get('pagina', 1)
-        # Padrão de 50 registros por página (conforme documentação Omie)
-        registros_por_pagina = kwargs.get('registros_por_pagina', 50)
+        # Padrão 200 registros por página (mais rápido; evita muitas requisições)
+        registros_por_pagina = kwargs.get('registros_por_pagina', 200)
         
         try:
             # Para APIs sem paginação (ex: extrato, ordem_servico), coleta apenas uma vez

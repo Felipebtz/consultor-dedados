@@ -18,7 +18,11 @@ from src.collectors import (
     ExtratoCollector,
     OrdemServicoCollector,
     ContasDRECollector,
-    ContaCorrenteCollector
+    ContaCorrenteCollector,
+    PedidoVendasCollector,
+    CrmOportunidadesCollector,
+    EtapasFaturamentoCollector,
+    ProdutoFornecedorCollector,
 )
 
 logging.basicConfig(
@@ -26,6 +30,9 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Tamanho do lote para inserção no MySQL (evita "Lost connection" em tabelas grandes)
+INSERT_BATCH_SIZE = 500
 
 
 class DataOrchestrator:
@@ -58,6 +65,10 @@ class DataOrchestrator:
             ExtratoCollector(self.api_client),
             OrdemServicoCollector(self.api_client),
             ContasDRECollector(self.api_client),
+            PedidoVendasCollector(self.api_client),
+            CrmOportunidadesCollector(self.api_client),
+            EtapasFaturamentoCollector(self.api_client),
+            ProdutoFornecedorCollector(self.api_client),
         ]
     
     def _save_metric_to_db(self, operation: str, duration: float, success: bool, records_count: int, error_message: str = None):
@@ -140,9 +151,12 @@ class DataOrchestrator:
                     "message": "Nenhum dado encontrado"
                 }
             
-            # Insere no banco de dados
+            # Insere no banco em lotes (evita Lost connection e timeout em tabelas grandes)
             table_name = collector.get_table_name()
-            records_inserted = self.db_manager.insert_batch(table_name, data)
+            records_inserted = 0
+            for i in range(0, len(data), INSERT_BATCH_SIZE):
+                chunk = data[i : i + INSERT_BATCH_SIZE]
+                records_inserted += self.db_manager.insert_batch(table_name, chunk)
             
             duration = self.metrics.stop_timer(timer_id, success=True, records_count=records_inserted)
             self._save_metric_to_db(operation_name, duration, True, records_inserted)

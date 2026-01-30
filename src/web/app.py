@@ -35,7 +35,8 @@ def get_stats():
         tables = [
             'clientes', 'produtos', 'servicos', 'categorias',
             'contas_receber', 'contas_pagar', 'extrato',
-            'ordem_servico', 'contas_dre'
+            'ordem_servico', 'contas_dre',
+            'pedido_vendas', 'crm_oportunidades', 'etapas_faturamento', 'produto_fornecedor'
         ]
         
         # Conta registros em cada tabela
@@ -47,8 +48,8 @@ def get_stats():
                 logger.warning(f"Erro ao contar registros em {table}: {str(e)}")
                 stats[table] = 0
         
-        # Total geral
-        stats['total_geral'] = sum(stats.values())
+        # Total geral (soma apenas contagens das tabelas)
+        stats['total_geral'] = sum(v for k, v in stats.items() if k != 'total_geral')
         
         return jsonify({
             'success': True,
@@ -118,7 +119,8 @@ def get_table_data(table_name):
         allowed_tables = [
             'clientes', 'produtos', 'servicos', 'categorias',
             'contas_receber', 'contas_pagar', 'extrato',
-            'ordem_servico', 'contas_dre'
+            'ordem_servico', 'contas_dre',
+            'pedido_vendas', 'crm_oportunidades', 'etapas_faturamento', 'produto_fornecedor'
         ]
         
         if table_name not in allowed_tables:

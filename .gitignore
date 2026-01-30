@@ -1,0 +1,14 @@
+# Não versionar .md (documentação local)
+*.md
+!README.md
+
+# Credenciais
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/

@@ -42,7 +42,7 @@ class OrdemServicoCollector(BaseCollector):
     def build_payload(
         self,
         pagina: int = 1,
-        registros_por_pagina: int = 50,
+        registros_por_pagina: int = 200,
         apenas_importado_api: str = "N",
         **kwargs
     ) -> Dict[str, Any]:

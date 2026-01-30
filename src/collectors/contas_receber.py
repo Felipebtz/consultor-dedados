@@ -47,7 +47,7 @@ class ContasReceberCollector(BaseCollector):
         data_inicio: str = None,
         data_fim: str = None,
         pagina: int = 1,
-        registros_por_pagina: int = 20,
+        registros_por_pagina: int = 200,
         **kwargs
     ) -> Dict[str, Any]:
         """

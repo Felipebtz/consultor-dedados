@@ -46,7 +46,7 @@ class ContaCorrenteCollector(BaseCollector):
     def build_payload(
         self,
         pagina: int = 1,
-        registros_por_pagina: int = 50,
+        registros_por_pagina: int = 200,
         **kwargs
     ) -> Dict[str, Any]:
         """
