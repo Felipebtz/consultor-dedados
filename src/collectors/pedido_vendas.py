@@ -53,12 +53,20 @@ class PedidoVendasCollector(BaseCollector):
             "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
         }
 
+    def supports_incremental(self) -> bool:
+        return True
+
     def build_payload(self, pagina: int = 1, registros_por_pagina: int = 200, **kwargs) -> Dict[str, Any]:
-        return {
+        payload = {
             "pagina": pagina,
             "registros_por_pagina": registros_por_pagina,
             "apenas_importado_api": "N",
         }
+        if kwargs.get("incremental") and kwargs.get("data_inicio") and kwargs.get("data_fim"):
+            payload["filtrar_por_data_de"] = kwargs["data_inicio"]
+            payload["filtrar_por_data_ate"] = kwargs["data_fim"]
+            payload["filtrar_apenas_alteracao"] = "S"
+        return payload
 
     def transform_data(self, raw_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Extrai pedido_venda_produto e gera uma linha por item (det)."""

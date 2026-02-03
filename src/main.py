@@ -1,5 +1,6 @@
 """
 Script principal para execução de coletas de dados do Omie.
+Suporta coleta full e incremental (--incremental: últimos 5 dias).
 """
 import sys
 from datetime import datetime, timedelta
@@ -13,47 +14,49 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+INCREMENTAL_DAYS_DEFAULT = 5
+
 
 def main():
     """Função principal."""
+    incremental = "--incremental" in sys.argv or "-i" in sys.argv
     try:
-        # Inicializa configurações
         settings = Settings()
-        
-        # Cria o orquestrador
         orchestrator = DataOrchestrator(settings)
-        
-        # Inicializa o banco de dados
         orchestrator.initialize_database()
         
-        # Define período padrão (últimos 6 meses)
-        data_fim = datetime.now().strftime("%Y-%m-%d")
-        data_inicio = (datetime.now() - timedelta(days=180)).strftime("%Y-%m-%d")
-        
-        print("\n" + "="*80)
-        print("SISTEMA DE COLETA DE DADOS OMIE")
-        print("="*80)
-        print(f"Período: {data_inicio} a {data_fim}")
-        print("="*80 + "\n")
-        
-        # Executa coletas gerais (sequencial para evitar rate limiting)
-        logger.info("Iniciando coletas gerais...")
-        results_general = orchestrator.run_collections(
-            parallel=False,  # Modo sequencial para evitar erros 500
-            max_workers=5
-        )
-        
-        # Executa coletas financeiras com período específico (sequencial)
-        logger.info("Iniciando coletas financeiras...")
-        results_financial = orchestrator.run_financial_collections(
-            data_inicio=data_inicio,
-            data_fim=data_fim,
-            parallel=False,  # Modo sequencial para evitar erros 500
-            max_workers=3
-        )
-        
-        # Combina resultados
-        all_results = results_general + results_financial
+        if incremental:
+            days = INCREMENTAL_DAYS_DEFAULT
+            for i, arg in enumerate(sys.argv):
+                if arg in ("--incremental", "-i") and i + 1 < len(sys.argv) and sys.argv[i + 1].isdigit():
+                    days = int(sys.argv[i + 1])
+                    break
+            data_fim = datetime.now().strftime("%Y-%m-%d")
+            data_inicio = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+            print("\n" + "="*80)
+            print("COLETA INCREMENTAL OMIE (apenas alterações/inclusões recentes)")
+            print("="*80)
+            print(f"Janela: {data_inicio} → {data_fim} ({days} dias)")
+            print("="*80 + "\n")
+            all_results = orchestrator.run_incremental_collections(days=days, parallel=False, max_workers=3)
+        else:
+            data_fim = datetime.now().strftime("%Y-%m-%d")
+            data_inicio = (datetime.now() - timedelta(days=180)).strftime("%Y-%m-%d")
+            print("\n" + "="*80)
+            print("SISTEMA DE COLETA DE DADOS OMIE (full)")
+            print("="*80)
+            print(f"Período: {data_inicio} a {data_fim}")
+            print("="*80 + "\n")
+            logger.info("Iniciando coletas gerais...")
+            results_general = orchestrator.run_collections(parallel=False, max_workers=5)
+            logger.info("Iniciando coletas financeiras...")
+            results_financial = orchestrator.run_financial_collections(
+                data_inicio=data_inicio,
+                data_fim=data_fim,
+                parallel=False,
+                max_workers=3
+            )
+            all_results = results_general + results_financial
         
         # Imprime resultados
         print("\n" + "="*80)

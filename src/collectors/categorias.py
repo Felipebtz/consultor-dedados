@@ -30,12 +30,20 @@ class CategoriasCollector(BaseCollector):
             "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
         }
     
+    def supports_incremental(self) -> bool:
+        return True
+
     def build_payload(self, pagina: int = 1, registros_por_pagina: int = 200, **kwargs) -> Dict[str, Any]:
         """
         Constrói o payload conforme documentação oficial da API Omie.
-        https://app.omie.com.br/api/v1/geral/categorias/
+        Em modo incremental: filtrar_por_data_de, filtrar_por_data_ate, filtrar_apenas_alteracao.
         """
-        return {
+        payload = {
             "pagina": pagina,
             "registros_por_pagina": registros_por_pagina
         }
+        if kwargs.get("incremental") and kwargs.get("data_inicio") and kwargs.get("data_fim"):
+            payload["filtrar_por_data_de"] = kwargs["data_inicio"]
+            payload["filtrar_por_data_ate"] = kwargs["data_fim"]
+            payload["filtrar_apenas_alteracao"] = "S"
+        return payload

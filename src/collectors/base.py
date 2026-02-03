@@ -1,14 +1,17 @@
 """
 Classe base para coletores de dados.
+Suporta coleta full e incremental (por janela de datas).
 """
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta
 from src.core.interfaces import IDataCollector, IApiClient
 import logging
 
 logger = logging.getLogger(__name__)
 
-logger = logging.getLogger(__name__)
+# Janela padrão para coleta incremental (últimos N dias)
+INCREMENTAL_DAYS_DEFAULT = 5
 
 
 class BaseCollector(IDataCollector, ABC):
@@ -51,10 +54,19 @@ class BaseCollector(IDataCollector, ABC):
         """
         pass
     
+    def supports_incremental(self) -> bool:
+        """
+        Indica se o coletor suporta atualização incremental (filtro por data).
+        Sobrescrever retornando True quando o endpoint Omie aceitar
+        filtrar_por_data_de, filtrar_por_data_ate e filtrar_apenas_alteracao.
+        """
+        return False
+
     def build_payload(self, **kwargs) -> Dict[str, Any]:
         """
         Constrói o payload para a requisição.
         Pode ser sobrescrito por classes filhas.
+        Em modo incremental, kwargs pode conter: data_inicio, data_fim, incremental.
         
         Args:
             **kwargs: Parâmetros específicos do coletor
@@ -144,8 +156,14 @@ class BaseCollector(IDataCollector, ABC):
         """
         all_data = []
         pagina = kwargs.get('pagina', 1)
-        # Padrão 200 registros por página (mais rápido; evita muitas requisições)
         registros_por_pagina = kwargs.get('registros_por_pagina', 200)
+        incremental = kwargs.get('incremental', False) and self.supports_incremental()
+        if incremental:
+            days = kwargs.get('incremental_days', INCREMENTAL_DAYS_DEFAULT)
+            data_fim = kwargs.get('data_fim') or datetime.now().strftime("%Y-%m-%d")
+            data_inicio = kwargs.get('data_inicio') or (datetime.now() - timedelta(days=int(days))).strftime("%Y-%m-%d")
+            kwargs = {**kwargs, "data_inicio": data_inicio, "data_fim": data_fim}
+            logger.info(f"Coleta incremental: {data_inicio} a {data_fim} (últimos {days} dias)")
         
         try:
             # Para APIs sem paginação (ex: extrato, ordem_servico), coleta apenas uma vez

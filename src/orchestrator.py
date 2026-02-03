@@ -1,8 +1,10 @@
 """
 Orquestrador principal para execução de coletas de dados.
+Suporta coleta full e incremental (janela de datas).
 """
 import concurrent.futures
 from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta
 import logging
 from src.config import Settings
 from src.omie import OmieApiClient
@@ -327,6 +329,80 @@ class DataOrchestrator:
                     data_fim=data_fim
                 )
                 results.append(result)
+            return results
+    
+    def run_incremental_collections(
+        self,
+        days: int = 5,
+        parallel: bool = False,
+        max_workers: int = 3
+    ) -> List[Dict[str, Any]]:
+        """
+        Executa coleta incremental: apenas registros alterados/incluídos na janela de datas.
+        Janela padrão: últimos 5 dias (ex.: 29/01/2026 → 02/02/2026).
+        Usa filtrar_por_data_de, filtrar_por_data_ate e filtrar_apenas_alteracao quando
+        o coletor suporta (supports_incremental() == True).
+        
+        Args:
+            days: Número de dias para trás (janela)
+            parallel: Se True, executa coletores incrementais em paralelo
+            max_workers: Número máximo de workers
+            
+        Returns:
+            Lista com resultados das coletas incrementais
+        """
+        data_fim = datetime.now().strftime("%Y-%m-%d")
+        data_inicio = (datetime.now() - timedelta(days=int(days))).strftime("%Y-%m-%d")
+        incremental_collectors = [c for c in self.collectors if c.supports_incremental()]
+        
+        logger.info(f"Coleta incremental: {data_inicio} a {data_fim} ({days} dias) - {len(incremental_collectors)} coletores")
+        
+        kwargs = {
+            "incremental": True,
+            "data_inicio": data_inicio,
+            "data_fim": data_fim,
+            "incremental_days": days,
+        }
+        
+        if parallel:
+            results = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_collector = {
+                    executor.submit(self.collect_data, collector, **kwargs): collector
+                    for collector in incremental_collectors
+                }
+                for future in concurrent.futures.as_completed(future_to_collector):
+                    collector = future_to_collector[future]
+                    try:
+                        result = future.result()
+                        results.append(result)
+                    except Exception as e:
+                        logger.error(f"Erro na coleta incremental de {collector.get_table_name()}: {str(e)}")
+                        results.append({
+                            "collector": collector.get_table_name(),
+                            "success": False,
+                            "records": 0,
+                            "message": str(e)
+                        })
+            return results
+        else:
+            results = []
+            for i, collector in enumerate(incremental_collectors, 1):
+                try:
+                    logger.info(f"[{i}/{len(incremental_collectors)}] Incremental: {collector.get_table_name()}...")
+                    result = self.collect_data(collector, **kwargs)
+                    results.append(result)
+                    if i < len(incremental_collectors):
+                        import time
+                        time.sleep(1)
+                except Exception as e:
+                    logger.error(f"Erro ao coletar incremental {collector.get_table_name()}: {str(e)}")
+                    results.append({
+                        "collector": collector.get_table_name(),
+                        "success": False,
+                        "records": 0,
+                        "message": str(e)
+                    })
             return results
     
     def get_metrics_summary(self) -> Dict[str, Any]:

@@ -7,6 +7,9 @@ from src.collectors.base import BaseCollector
 
 class ContasPagarCollector(BaseCollector):
     """Coletor para dados de contas a pagar."""
+
+    def supports_incremental(self) -> bool:
+        return True
     
     def get_endpoint(self) -> str:
         return "financas/contapagar/"
@@ -59,10 +62,12 @@ class ContasPagarCollector(BaseCollector):
             "registros_por_pagina": registros_por_pagina,
             "apenas_importado_api": "N"
         }
-        
         if data_inicio:
             payload["data_vencimento_inicial"] = data_inicio
         if data_fim:
             payload["data_vencimento_final"] = data_fim
-            
+        if kwargs.get("incremental") and (data_inicio and data_fim):
+            payload["filtrar_por_data_de"] = data_inicio
+            payload["filtrar_por_data_ate"] = data_fim
+            payload["filtrar_apenas_alteracao"] = "S"
         return payload
