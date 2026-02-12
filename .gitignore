@@ -4,6 +4,7 @@
 
 # Credenciais
 .env
+lille-422512-a12a0a3c757b.json
 
 # Python
 __pycache__/
@@ -14,4 +15,3 @@ venv/
 *.egg-info/
 /LutadorClasse.java
 /anuncio.js
-
