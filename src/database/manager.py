@@ -12,6 +12,9 @@ from src.config import DatabaseSettings
 
 logger = logging.getLogger(__name__)
 
+# Tamanho do lote para insert (evita exceder max_allowed_packet do MySQL)
+INSERT_BATCH_SIZE = 500
+
 
 class DatabaseManager(IDatabaseManager):
     """
@@ -258,24 +261,65 @@ class DatabaseManager(IDatabaseManager):
                     ON DUPLICATE KEY UPDATE {update_clause}
                 """
                 
-                # Prepara os valores
-                values = []
-                for record in filtered_data:
-                    values.append([record.get(col) for col in columns_to_insert])
-                
-                # Insere em lote
-                cursor.executemany(query, values)
-                affected_rows = cursor.rowcount
+                # Prepara os valores e insere em lotes (evita max_allowed_packet)
+                affected_rows = 0
+                for i in range(0, len(filtered_data), INSERT_BATCH_SIZE):
+                    chunk = filtered_data[i : i + INSERT_BATCH_SIZE]
+                    values = [[record.get(col) for col in columns_to_insert] for record in chunk]
+                    cursor.executemany(query, values)
+                    affected_rows += cursor.rowcount
                 
                 cursor.close()
-                
+            
             logger.info(f"Inseridos {affected_rows} registros na tabela '{table_name}'")
             return affected_rows
             
         except Error as e:
             logger.error(f"Erro ao inserir dados na tabela '{table_name}': {str(e)}")
             raise
-    
+
+    def truncate_table(self, table_name: str) -> bool:
+        """Esvazia a tabela antes da carga (full refresh, evita duplicação)."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"TRUNCATE TABLE `{table_name}`")
+                conn.commit()
+                cursor.close()
+            logger.info(f"Tabela MySQL '{table_name}' truncada para nova carga")
+            return True
+        except Error as e:
+            logger.warning(f"Truncate em '{table_name}' falhou: {e}")
+            return False
+
+    def get_existing_keys(self, table_name: str, key_columns: List[str]) -> set:
+        """Retorna o conjunto de chaves já presentes na tabela (para carga incremental)."""
+        if not key_columns:
+            return set()
+        cols = ", ".join(f"`{c}`" for c in key_columns)
+        query = f"SELECT {cols} FROM `{table_name}`"
+        try:
+            result = self.execute_query(query)
+            if not result:
+                return set()
+            if len(key_columns) == 1:
+                k = key_columns[0]
+                return {self._prepare_value(r.get(k)) for r in result if r.get(k) is not None}
+            return {tuple(self._prepare_value(r.get(c)) for c in key_columns) for r in result}
+        except Exception as e:
+            logger.warning(f"Erro ao buscar chaves existentes em '{table_name}': {e}")
+            return set()
+
+    def get_key_from_record(self, record: Dict[str, Any], key_columns: List[str]) -> Any:
+        """Extrai a chave do registro (mesmo flatten que o insert usa). Para comparar com get_existing_keys."""
+        if not key_columns:
+            return None
+        flat = self._flatten_dict(record)
+        vals = [self._prepare_value(flat.get(c)) for c in key_columns]
+        if len(key_columns) == 1:
+            return vals[0]
+        return tuple(vals)
+
     def execute_query(self, query: str, params: Optional[Dict] = None) -> Any:
         """
         Executa uma query SQL.

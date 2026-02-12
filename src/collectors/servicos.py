@@ -100,7 +100,14 @@ class ServicosCollector(BaseCollector):
         
         # Se ainda não encontrou, usa fallback
         if not data_list:
-            logger.warning(f"Nenhum dado encontrado. Chaves disponíveis: {list(raw_data.keys())}")
+            if raw_data.get("faultstring"):
+                logger.warning(
+                    f"Serviços API retornou erro: {raw_data.get('faultstring')}. Chaves: {list(raw_data.keys())}"
+                )
+            else:
+                logger.warning(
+                    f"Serviços: nenhuma lista encontrada. Chaves disponíveis: {list(raw_data.keys())}"
+                )
             data_list = super().transform_data(raw_data)
         
         # Mapeia campos da API para campos do schema

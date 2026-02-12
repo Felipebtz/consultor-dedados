@@ -247,9 +247,14 @@
                 { key: 'ordem_servico', label: 'Ordens de Serviço', icon: '📋' },
                 { key: 'contas_dre', label: 'Contas DRE', icon: '📈' },
                 { key: 'pedido_vendas', label: 'Pedidos de Venda', icon: '🛒' },
+                { key: 'pedidos_compra', label: 'Pedidos de Compra', icon: '📥' },
                 { key: 'crm_oportunidades', label: 'CRM Oportunidades', icon: '🎯' },
                 { key: 'etapas_faturamento', label: 'Etapas Faturamento', icon: '📌' },
-                { key: 'produto_fornecedor', label: 'Produto x Fornecedor', icon: '🏭' }
+                { key: 'produto_fornecedor', label: 'Produto x Fornecedor', icon: '🏭' },
+                { key: 'servico_resumo', label: 'Resumo Serviços', icon: '📄' },
+                { key: 'vendas_resumo', label: 'Resumo Vendas', icon: '🛍️' },
+                { key: 'nfse', label: 'NFS-e', icon: '🧾' },
+                { key: 'nf_consultar', label: 'NF-e', icon: '📑' }
             ];
             
             tables.forEach(table => {
@@ -379,7 +384,11 @@
                 'pedido_vendas_collect': '🛒 Pedidos de Venda',
                 'crm_oportunidades_collect': '🎯 CRM Oportunidades',
                 'etapas_faturamento_collect': '📌 Etapas Faturamento',
-                'produto_fornecedor_collect': '🏭 Produto x Fornecedor'
+                'produto_fornecedor_collect': '🏭 Produto x Fornecedor',
+                'servico_resumo_collect': '📄 Resumo Serviços',
+                'vendas_resumo_collect': '🛍️ Resumo Vendas',
+                'nfse_collect': '🧾 NFS-e',
+                'nf_consultar_collect': '📑 NF-e'
             };
             
             if (data.operations && data.operations.length > 0) {

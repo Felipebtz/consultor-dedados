@@ -72,6 +72,13 @@ def main():
         # Imprime métricas de performance
         orchestrator.print_metrics_summary()
         
+        # --- BIGQUERY / GCS: metadado da coleta (comentário para rastreabilidade) ---
+        # Aqui você pode montar o metadado (execucao_id, data_inicio, data_fim, modo,
+        # tabelas_coletadas, registros_por_tabela, etc.) e:
+        # 1) Gravar em JSON (ex.: metadata_coleta_YYYYMMDD_HHMMSS.json) para enviar ao GCS
+        # 2) Gravar em tabela MySQL execucao_coleta (opcional)
+        # Ver docs/BIGQUERY_GCS_PASSO_A_PASSO.md para o passo a passo completo (GCS → BigQuery).
+        
         # Limpa recursos
         orchestrator.cleanup()
         

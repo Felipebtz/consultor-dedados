@@ -16,6 +16,11 @@ from src.collectors.pedido_vendas import PedidoVendasCollector
 from src.collectors.crm_oportunidades import CrmOportunidadesCollector
 from src.collectors.etapas_faturamento import EtapasFaturamentoCollector
 from src.collectors.produto_fornecedor import ProdutoFornecedorCollector
+from src.collectors.servico_resumo import ServicoResumoCollector
+from src.collectors.vendas_resumo import VendasResumoCollector
+from src.collectors.nfse import NfseCollector
+from src.collectors.nfconsultar import NfConsultarCollector
+from src.collectors.pedidos_compra import PedidosCompraCollector
 
 __all__ = [
     "BaseCollector",
@@ -33,4 +38,9 @@ __all__ = [
     "CrmOportunidadesCollector",
     "EtapasFaturamentoCollector",
     "ProdutoFornecedorCollector",
+    "ServicoResumoCollector",
+    "VendasResumoCollector",
+    "NfseCollector",
+    "NfConsultarCollector",
+    "PedidosCompraCollector",
 ]

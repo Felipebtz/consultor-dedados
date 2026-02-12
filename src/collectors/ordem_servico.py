@@ -22,6 +22,7 @@ class OrdemServicoCollector(BaseCollector):
     
     def get_schema(self) -> Dict[str, str]:
         return {
+            #CONFIRA AQUI POIS PODE DÁ DUPLICACAO POR NÃO TER ID AUTOINCREMENT
             "codigo_os": "VARCHAR(50) PRIMARY KEY",
             "codigo_os_integracao": "VARCHAR(50)",
             "codigo_cliente": "VARCHAR(50)",
@@ -67,16 +68,22 @@ class OrdemServicoCollector(BaseCollector):
     def transform_data(self, raw_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         Transforma os dados de ordens de serviço conforme documentação oficial.
-        Retorno: osListarResponse
+        API Omie retorna: pagina, total_de_paginas, registros, total_de_registros, osCadastro (na raiz).
         """
-        # Log para debug
-        logger.debug(f"Chaves disponíveis na resposta: {list(raw_data.keys())}")
-        
-        # Conforme documentação: osListarResponse
         data_list = []
+        # Formato exato da API (Postman): osCadastro na raiz
+        if "osCadastro" in raw_data and isinstance(raw_data["osCadastro"], list):
+            data_list = raw_data["osCadastro"]
+            logger.info(f"Encontrados {len(data_list)} registros em 'osCadastro' (raiz)")
+        # Resposta às vezes vem dentro do nome do método
+        if not data_list and "ListarOS" in raw_data:
+            inner = raw_data["ListarOS"]
+            if isinstance(inner, dict) and "osCadastro" in inner and isinstance(inner["osCadastro"], list):
+                data_list = inner["osCadastro"]
+                logger.info(f"Encontrados {len(data_list)} registros em 'ListarOS.osCadastro'")
         
-        # Tenta a chave oficial primeiro
-        if "osListarResponse" in raw_data:
+        # Conforme documentação: osListarResponse (wrapper alternativo)
+        if not data_list and "osListarResponse" in raw_data:
             response = raw_data["osListarResponse"]
             if isinstance(response, dict):
                 # Procura por chaves comuns que podem conter a lista

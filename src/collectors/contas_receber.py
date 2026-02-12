@@ -1,8 +1,23 @@
 """
 Coletor de dados de Contas a Receber.
+API: financas/contareceber/ - ListarContasReceber (lcrListarRequest).
+Payload: pagina, registros_por_pagina, apenas_importado_api; incremental: filtrar_por_data_de, filtrar_por_data_ate, filtrar_apenas_alteracao (datas em DD/MM/YYYY).
 """
 from typing import Dict, Any
 from src.collectors.base import BaseCollector
+
+
+def _date_omie(d: str) -> str:
+    """Converte YYYY-MM-DD para DD/MM/YYYY (formato Omie)."""
+    if not d or len(d) < 10:
+        return d
+    try:
+        parts = d[:10].split("-")
+        if len(parts) == 3:
+            return f"{parts[2]}/{parts[1]}/{parts[0]}"
+    except Exception:
+        pass
+    return d
 
 
 class ContasReceberCollector(BaseCollector):
@@ -46,28 +61,23 @@ class ContasReceberCollector(BaseCollector):
         }
     
     def build_payload(
-        self, 
-        data_inicio: str = None,
-        data_fim: str = None,
+        self,
         pagina: int = 1,
         registros_por_pagina: int = 200,
         **kwargs
     ) -> Dict[str, Any]:
         """
-        Constrói o payload conforme documentação oficial da API Omie.
-        https://app.omie.com.br/api/v1/financas/contareceber/
+        Payload conforme lcrListarRequest (ListarContasReceber).
+        Não usar data_vencimento_inicial/final (não existem na API).
+        Incremental: filtrar_por_data_de, filtrar_por_data_ate (DD/MM/YYYY), filtrar_apenas_alteracao.
         """
         payload = {
             "pagina": pagina,
             "registros_por_pagina": registros_por_pagina,
-            "apenas_importado_api": "N"
+            "apenas_importado_api": "N",
         }
-        if data_inicio:
-            payload["data_vencimento_inicial"] = data_inicio
-        if data_fim:
-            payload["data_vencimento_final"] = data_fim
-        if kwargs.get("incremental") and (data_inicio and data_fim):
-            payload["filtrar_por_data_de"] = data_inicio
-            payload["filtrar_por_data_ate"] = data_fim
+        if kwargs.get("incremental") and kwargs.get("data_inicio") and kwargs.get("data_fim"):
+            payload["filtrar_por_data_de"] = _date_omie(kwargs["data_inicio"])
+            payload["filtrar_por_data_ate"] = _date_omie(kwargs["data_fim"])
             payload["filtrar_apenas_alteracao"] = "S"
         return payload

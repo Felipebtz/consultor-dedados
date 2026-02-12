@@ -62,6 +62,15 @@ class BaseCollector(IDataCollector, ABC):
         """
         return False
 
+    def get_unique_key_columns(self) -> List[str]:
+        """
+        Colunas que formam a chave única para carga incremental.
+        Se retornar lista não vazia: não trunca; insere só registros cuja chave ainda não existe.
+        Ex.: ["pedido_item_key"] para pedido_vendas.
+        Retornar [] para full refresh (truncar + inserir tudo).
+        """
+        return []
+
     def build_payload(self, **kwargs) -> Dict[str, Any]:
         """
         Constrói o payload para a requisição.
@@ -183,7 +192,7 @@ class BaseCollector(IDataCollector, ABC):
                     break
                 
                 # Detecta formato de paginação usado
-                usa_paginacao = any(k in payload for k in ['pagina', 'nPagina', 'registros_por_pagina', 'nRegPorPagina'])
+                usa_paginacao = any(k in payload for k in ['pagina', 'nPagina', 'registros_por_pagina', 'nRegPorPagina', 'nRegsPorPagina'])
                 
                 # Se não usa paginação, coleta apenas uma vez
                 if not usa_paginacao and iteration > 0:
@@ -228,27 +237,35 @@ class BaseCollector(IDataCollector, ABC):
                 if not usa_paginacao:
                     break
                 
-                # Verifica se há mais páginas (formato Omie: clientes_listfull_response)
-                total_de_paginas = response.get('total_de_paginas', 0)
-                total_de_registros = response.get('total_de_registros', 0)
+                # Verifica se há mais páginas (Omie pode usar total_de_paginas, nTotalPaginas, nTotPaginas etc.)
+                total_de_paginas = (
+                    response.get('total_de_paginas')
+                    or response.get('nTotalPaginas')
+                    or response.get('nTotPaginas')
+                    or response.get('totalPaginas')
+                    or 0
+                )
+                total_de_registros = (
+                    response.get('total_de_registros')
+                    or response.get('nTotalRegistros')
+                    or response.get('nTotRegistros')
+                    or response.get('totalRegistros')
+                    or 0
+                )
+                reg_por_pag = payload.get('nRegPorPagina') or payload.get('nRegsPorPagina') or payload.get('registros_por_pagina', registros_por_pagina)
                 
                 if total_de_paginas:
-                    # Se já coletou todas as páginas, para
-                    if pagina >= total_de_paginas:
+                    if pagina >= int(total_de_paginas):
                         break
                 elif total_de_registros:
-                    # Fallback: calcula total de páginas
-                    # Para serviços, usa nRegPorPagina do payload
-                    reg_por_pag = payload.get('nRegPorPagina') or payload.get('registros_por_pagina', registros_por_pagina)
-                    total_paginas = (total_de_registros + reg_por_pag - 1) // reg_por_pag
+                    total_paginas = (int(total_de_registros) + reg_por_pag - 1) // reg_por_pag
                     if pagina >= total_paginas:
                         break
                 
-                # Se a página retornou menos registros que o esperado, não há mais páginas
-                reg_por_pag = payload.get('nRegPorPagina') or payload.get('registros_por_pagina', registros_por_pagina)
-                if len(page_data) < reg_por_pag:
+                # Para quando a página veio vazia (fim dos dados)
+                if len(page_data) == 0:
                     break
-                
+                # Caso contrário continua para a próxima página (API pode retornar 100 por vez mesmo pedindo 200)
                 pagina += 1
                 iteration += 1
             

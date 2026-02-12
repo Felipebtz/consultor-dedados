@@ -1,9 +1,11 @@
 """
 Aplicação Web Flask para Dashboard do Sistema de Coleta Omie.
+Lê do BigQuery quando GCP está configurado; senão lê do MySQL.
 """
 from flask import Flask, render_template, jsonify
 from src.config import Settings
 from src.database import DatabaseManager
+from src.bigquery import BigQueryManager
 from src.metrics import MetricsCollector
 import logging
 
@@ -14,9 +16,20 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False
 
-# Inicializar componentes
+# Inicializar: BigQuery se GCP configurado, senão MySQL
 settings = Settings()
-db_manager = DatabaseManager(settings.database)
+gcp = settings.gcp
+if gcp.GOOGLE_APPLICATION_CREDENTIALS and gcp.project_id and gcp.dataset_id:
+    try:
+        db_manager = BigQueryManager(gcp)
+        _use_bigquery = True
+    except Exception as e:
+        logger.warning(f"BigQuery indisponível ({e}), usando MySQL")
+        db_manager = DatabaseManager(settings.database)
+        _use_bigquery = False
+else:
+    db_manager = DatabaseManager(settings.database)
+    _use_bigquery = False
 
 
 @app.route('/')
@@ -31,19 +44,23 @@ def get_stats():
     try:
         stats = {}
         
-        # Lista de tabelas
+        # Lista de tabelas (inclui faturamento e pedidos_compra)
         tables = [
             'clientes', 'produtos', 'servicos', 'categorias',
             'contas_receber', 'contas_pagar', 'extrato',
             'ordem_servico', 'contas_dre',
-            'pedido_vendas', 'crm_oportunidades', 'etapas_faturamento', 'produto_fornecedor'
+            'pedido_vendas', 'pedidos_compra', 'crm_oportunidades', 'etapas_faturamento', 'produto_fornecedor',
+            'servico_resumo', 'vendas_resumo', 'nfse', 'nf_consultar'
         ]
         
         # Conta registros em cada tabela
         for table in tables:
             try:
-                result = db_manager.execute_query(f"SELECT COUNT(*) as total FROM {table}")
-                stats[table] = result[0]['total'] if result else 0
+                if _use_bigquery:
+                    stats[table] = db_manager.get_table_count(table)
+                else:
+                    result = db_manager.execute_query(f"SELECT COUNT(*) as total FROM {table}")
+                    stats[table] = result[0]['total'] if result else 0
             except Exception as e:
                 logger.warning(f"Erro ao contar registros em {table}: {str(e)}")
                 stats[table] = 0
@@ -70,14 +87,15 @@ def get_financial():
         financial_data = {}
         
         # Contas a Receber
+        tbl_cr = db_manager.table_ref("contas_receber") if _use_bigquery else "contas_receber"
         try:
-            contas_receber = db_manager.execute_query("""
+            contas_receber = db_manager.execute_query(f"""
                 SELECT 
                     COUNT(*) as total,
                     SUM(valor_documento) as total_valor,
                     SUM(valor_pago) as total_pago,
                     SUM(saldo) as total_saldo
-                FROM contas_receber
+                FROM {tbl_cr}
             """)
             financial_data['contas_receber'] = contas_receber[0] if contas_receber else {}
         except Exception as e:
@@ -85,14 +103,15 @@ def get_financial():
             financial_data['contas_receber'] = {}
         
         # Contas a Pagar
+        tbl_cp = db_manager.table_ref("contas_pagar") if _use_bigquery else "contas_pagar"
         try:
-            contas_pagar = db_manager.execute_query("""
+            contas_pagar = db_manager.execute_query(f"""
                 SELECT 
                     COUNT(*) as total,
                     SUM(valor_documento) as total_valor,
                     SUM(valor_pago) as total_pago,
                     SUM(saldo) as total_saldo
-                FROM contas_pagar
+                FROM {tbl_cp}
             """)
             financial_data['contas_pagar'] = contas_pagar[0] if contas_pagar else {}
         except Exception as e:
@@ -115,12 +134,13 @@ def get_financial():
 def get_table_data(table_name):
     """Retorna dados de uma tabela específica."""
     try:
-        # Validação básica de segurança
+        # Validação básica de segurança (inclui faturamento e pedidos_compra)
         allowed_tables = [
             'clientes', 'produtos', 'servicos', 'categorias',
             'contas_receber', 'contas_pagar', 'extrato',
             'ordem_servico', 'contas_dre',
-            'pedido_vendas', 'crm_oportunidades', 'etapas_faturamento', 'produto_fornecedor'
+            'pedido_vendas', 'pedidos_compra', 'crm_oportunidades', 'etapas_faturamento', 'produto_fornecedor',
+            'servico_resumo', 'vendas_resumo', 'nfse', 'nf_consultar'
         ]
         
         if table_name not in allowed_tables:
@@ -130,7 +150,8 @@ def get_table_data(table_name):
             }), 400
         
         # Buscar dados (limitado a 100 registros)
-        data = db_manager.execute_query(f"SELECT * FROM {table_name} LIMIT 100")
+        tbl = db_manager.table_ref(table_name) if _use_bigquery else table_name
+        data = db_manager.execute_query(f"SELECT * FROM {tbl} LIMIT 100")
         
         return jsonify({
             'success': True,
@@ -149,6 +170,7 @@ def get_table_data(table_name):
 def get_metrics():
     """Retorna métricas de tempo de coleta das APIs."""
     try:
+        tbl = db_manager.table_ref("api_metrics") if _use_bigquery else "api_metrics"
         # Criar tabela de métricas se não existir
         try:
             db_manager.create_table('api_metrics', {
@@ -160,40 +182,66 @@ def get_metrics():
                 'error_message': 'TEXT',
                 'created_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'
             })
-        except:
+        except Exception:
             pass  # Tabela já existe
         
-        # Buscar últimas métricas (últimas 50 execuções)
-        metrics = db_manager.execute_query("""
-            SELECT 
-                operation,
-                AVG(duration) as avg_duration,
-                MIN(duration) as min_duration,
-                MAX(duration) as max_duration,
-                SUM(records_count) as total_records,
-                SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as success_count,
-                SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as error_count,
-                MAX(created_at) as last_execution
-            FROM api_metrics
-            WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
-            GROUP BY operation
-            ORDER BY last_execution DESC
-        """)
-        
-        # Buscar última execução completa
-        last_execution = db_manager.execute_query("""
-            SELECT 
-                SUM(duration) as total_time,
-                COUNT(*) as total_operations,
-                SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful_operations,
-                SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failed_operations,
-                SUM(records_count) as total_records,
-                MAX(created_at) as last_run
-            FROM api_metrics
-            WHERE created_at = (
-                SELECT MAX(created_at) FROM api_metrics
-            )
-        """)
+        # Buscar últimas métricas (últimas 24h); BigQuery usa TIMESTAMP_SUB
+        if _use_bigquery:
+            metrics = db_manager.execute_query(f"""
+                SELECT 
+                    operation,
+                    AVG(duration) as avg_duration,
+                    MIN(duration) as min_duration,
+                    MAX(duration) as max_duration,
+                    SUM(records_count) as total_records,
+                    SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as success_count,
+                    SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as error_count,
+                    MAX(created_at) as last_execution
+                FROM {tbl}
+                WHERE created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
+                GROUP BY operation
+                ORDER BY last_execution DESC
+            """)
+            last_execution = db_manager.execute_query(f"""
+                SELECT 
+                    SUM(duration) as total_time,
+                    COUNT(*) as total_operations,
+                    SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful_operations,
+                    SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failed_operations,
+                    SUM(records_count) as total_records,
+                    MAX(created_at) as last_run
+                FROM {tbl}
+                WHERE created_at = (SELECT MAX(created_at) FROM {tbl})
+            """)
+        else:
+            metrics = db_manager.execute_query("""
+                SELECT 
+                    operation,
+                    AVG(duration) as avg_duration,
+                    MIN(duration) as min_duration,
+                    MAX(duration) as max_duration,
+                    SUM(records_count) as total_records,
+                    SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as success_count,
+                    SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as error_count,
+                    MAX(created_at) as last_execution
+                FROM api_metrics
+                WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                GROUP BY operation
+                ORDER BY last_execution DESC
+            """)
+            last_execution = db_manager.execute_query("""
+                SELECT 
+                    SUM(duration) as total_time,
+                    COUNT(*) as total_operations,
+                    SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful_operations,
+                    SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failed_operations,
+                    SUM(records_count) as total_records,
+                    MAX(created_at) as last_run
+                FROM api_metrics
+                WHERE created_at = (
+                    SELECT MAX(created_at) FROM api_metrics
+                )
+            """)
         
         return jsonify({
             'success': True,

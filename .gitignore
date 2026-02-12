@@ -12,3 +12,6 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+/LutadorClasse.java
+/anuncio.js
+

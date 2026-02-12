@@ -46,7 +46,11 @@ class IDatabaseManager(ABC):
     def insert_batch(self, table_name: str, data: List[Dict[str, Any]]) -> int:
         """Insere dados em lote."""
         pass
-    
+
+    def truncate_table(self, table_name: str) -> bool:
+        """Esvazia a tabela antes de nova carga (evita duplicação). Retorna True se ok."""
+        return True  # default: não faz nada; implementações podem sobrescrever
+
     @abstractmethod
     def execute_query(self, query: str, params: Optional[Dict] = None) -> Any:
         """Executa uma query SQL."""

@@ -12,6 +12,9 @@ Coletores disponíveis:
 - extrato
 - ordem_servico
 - contas_dre
+- pedido_vendas
+- pedidos_compra
+- nfse
 """
 import sys
 import logging
@@ -19,6 +22,7 @@ from datetime import datetime, timedelta
 from src.config import Settings
 from src.omie import OmieApiClient
 from src.database import DatabaseManager
+from src.bigquery import BigQueryManager
 from src.metrics import MetricsCollector
 from src.collectors import (
     ClientesCollector,
@@ -30,7 +34,10 @@ from src.collectors import (
     ExtratoCollector,
     OrdemServicoCollector,
     ContasDRECollector,
-    ContaCorrenteCollector
+    ContaCorrenteCollector,
+    PedidoVendasCollector,
+    NfseCollector,
+    PedidosCompraCollector,
 )
 
 # Configuração de logging
@@ -55,7 +62,10 @@ COLLECTORS = {
     'extrato': ExtratoCollector,
     'ordem_servico': OrdemServicoCollector,
     'contas_dre': ContasDRECollector,
-    'conta_corrente': ContaCorrenteCollector
+    'conta_corrente': ContaCorrenteCollector,
+    'pedido_vendas': PedidoVendasCollector,
+    'nfse': NfseCollector,
+    'pedidos_compra': PedidosCompraCollector,
 }
 
 
@@ -77,14 +87,22 @@ def test_collector(collector_name: str):
         # Inicializa componentes
         settings = Settings()
         api_client = OmieApiClient(settings.omie)
-        db_manager = DatabaseManager(settings.database)
+        # BigQuery quando GCP configurado (.env); senão MySQL
+        gcp = settings.gcp
+        if gcp.GOOGLE_APPLICATION_CREDENTIALS and gcp.project_id and gcp.dataset_id:
+            logger.info("Usando BigQuery como destino")
+            db_manager = BigQueryManager(gcp)
+            print("📌 Destino: BigQuery")
+        else:
+            db_manager = DatabaseManager(settings.database)
+            print("📌 Destino: MySQL")
         metrics = MetricsCollector()
         
         # Cria o coletor
         CollectorClass = COLLECTORS[collector_name]
         collector = CollectorClass(api_client)
         
-        # Inicializa banco de dados
+        # Inicializa banco de dados (dataset/cria tabela)
         logger.info("Inicializando banco de dados...")
         db_manager.create_database_if_not_exists()
         db_manager.create_table(collector.get_table_name(), collector.get_schema())
