@@ -40,10 +40,11 @@ class OmieApiClient(IApiClient):
         """
         session = requests.Session()
         
+        # Não retry em 500: API Omie costuma devolver 500 estável (ex.: módulo desativado); falha na 1ª.
         retry_strategy = Retry(
             total=self.settings.MAX_RETRIES,
             backoff_factor=self.settings.RETRY_DELAY,
-            status_forcelist=[429, 500, 502, 503, 504],
+            status_forcelist=[429, 502, 503, 504],
             allowed_methods=["POST"]
         )
         
@@ -78,7 +79,9 @@ class OmieApiClient(IApiClient):
         Raises:
             requests.RequestException: Em caso de erro na requisição
         """
-        url = f"{self.settings.BASE_URL}/{endpoint}"
+        # Garante barra final no path (evita 301 redirect na Omie); method vai no body (call).
+        path = endpoint.rstrip("/") + "/"
+        url = f"{self.settings.BASE_URL}/{path}"
         
         # Constrói o payload completo
         full_payload = self.authenticator.build_payload(method, payload)
@@ -93,37 +96,38 @@ class OmieApiClient(IApiClient):
             else:
                 time.sleep(0.3)  # 300ms para outras APIs
             
+            # Pedidos de compra: API Omie pode demorar (ex.: nbronze usa timeout=120)
+            timeout = 120 if "pedidocompra" in endpoint.lower() else self.settings.TIMEOUT
             response = self.session.post(
                 url,
                 json=full_payload,
-                timeout=self.settings.TIMEOUT,
+                timeout=timeout,
                 headers={"Content-Type": "application/json"}
             )
             elapsed_time = time.time() - start_time
-            
-            # Se recebeu erro 500, aguarda mais tempo antes de retry
-            if response.status_code == 500:
-                wait_time = 5 if "extrato" in endpoint.lower() else 2
-                logger.warning(f"Erro 500 recebido, aguardando {wait_time}s antes de retry...")
-                time.sleep(wait_time)
-            
+
+            if response.status_code >= 400:
+                try:
+                    body = response.json()
+                    msg = body.get("faultstring") or body.get("message") or str(body)[:500]
+                except Exception:
+                    msg = response.text[:500] if response.text else "(sem corpo)"
+                logger.error(
+                    f"Omie API {response.status_code}: endpoint={endpoint} call={method} - {msg}"
+                )
+
             response.raise_for_status()
             result = response.json()
             
             logger.info(
-                f"API Request: {endpoint}/{method} - "
-                f"Status: {response.status_code} - "
-                f"Time: {elapsed_time:.2f}s"
+                f"API Request: endpoint={endpoint} call={method} - "
+                f"Status: {response.status_code} - Time: {elapsed_time:.2f}s"
             )
             
             return result
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"Erro na requisição {endpoint}/{method}: {str(e)}")
-            # Se for erro 500, aguarda mais tempo antes de retry
-            if "500" in str(e) or "too many 500" in str(e).lower():
-                logger.warning("Muitos erros 500 detectados. Aguardando 5s antes de continuar...")
-                time.sleep(5)
+            logger.error(f"Erro na requisição endpoint={endpoint} call={method}: {str(e)}")
             raise
     
     def close(self):

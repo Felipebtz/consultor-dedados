@@ -199,9 +199,9 @@ class BaseCollector(IDataCollector, ABC):
                     break
                 
                 if not usa_paginacao:
-                    logger.info(f"Coletando dados: {endpoint}/{method} (sem paginação)")
+                    logger.info(f"Coletando dados: endpoint={endpoint} call={method} (sem paginação)")
                 else:
-                    logger.info(f"Coletando dados: {endpoint}/{method} - Página {pagina}")
+                    logger.info(f"Coletando dados: endpoint={endpoint} call={method} - Página {pagina}")
                 
                 # Adiciona delay entre requisições para evitar rate limiting
                 if iteration > 0:

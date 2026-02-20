@@ -52,62 +52,78 @@ class PedidosCompraCollector(BaseCollector):
             "cod_pedido_integracao": "VARCHAR(50)",
             "numero": "VARCHAR(30)",
             "cod_fornecedor": "VARCHAR(50)",
+            "cod_fornecedor_integracao": "VARCHAR(50)",
+            "cnpj_cpf_fornecedor": "VARCHAR(20)",
             "data_previsao": "VARCHAR(20)",
+            "cod_parc": "VARCHAR(10)",
+            "qtde_parc": "INT",
+            "cod_categoria": "VARCHAR(30)",
+            "cod_comprador": "VARCHAR(20)",
+            "contato": "VARCHAR(120)",
+            "numero_contrato": "VARCHAR(30)",
+            "numero_pedido_fornecedor": "VARCHAR(30)",
             "cod_conta_corrente": "VARCHAR(50)",
+            "cod_conta_corrente_integracao": "VARCHAR(50)",
             "cod_projeto": "VARCHAR(50)",
             "observacao": "TEXT",
+            "observacao_interna": "TEXT",
             "quantidade_itens": "INT",
             "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
             "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
         }
 
     def supports_incremental(self) -> bool:
-        return True
+        return False  # Desativado por enquanto (API Omie 500); coleta só em full.
 
     def get_unique_key_columns(self) -> List[str]:
-        return ["cod_pedido"]
+        return []  # Full refresh: truncar e inserir tudo (sem incremental).
 
     def build_payload(
         self,
         pagina: int = 1,
-        registros_por_pagina: int = 50,
+        registros_por_pagina: int = 100,
         **kwargs
     ) -> Dict[str, Any]:
         """
-        Payload conforme com_pedido_pesquisar_request (PesquisarPedCompra).
-        Exemplo oficial: nPagina, nRegsPorPagina, lApenasImportadoApi, lExibirPedidos* (T/F), dDataInicial, dDataFinal (DD/MM/YYYY), lApenasAlterados (F).
-        Usar janela de datas menor (ex.: último ano) para evitar 500.
+        Payload alinhado à API Omie. Máximo 100 registros por página (limite da Omie).
+        Janela: 01/01/2024 até hoje. Flags iguais ao script que funciona.
         """
-        # Janela padrão: último ano (API pode retornar 500 com intervalo muito grande)
-        from datetime import datetime, timedelta
+        from datetime import datetime
         hoje = datetime.now()
-        um_ano_atras = hoje - timedelta(days=365)
-        data_inicio_default = um_ano_atras.strftime("%d/%m/%Y")
+        data_inicio_default = "01/01/2024"
         data_fim_default = hoje.strftime("%d/%m/%Y")
 
+        # Omie: máximo 100 registros por página neste endpoint
+        n_regs = min(int(registros_por_pagina), 100)
         payload = {
-            "nPagina": pagina,
-            "nRegsPorPagina": registros_por_pagina,
+            "nPagina": int(pagina),
+            "nRegsPorPagina": n_regs,
             "lApenasImportadoApi": "F",
             "lExibirPedidosPendentes": "T",
-            "lExibirPedidosFaturados": "F",
-            "lExibirPedidosRecebidos": "F",
+            "lExibirPedidosFaturados": "T",
+            "lExibirPedidosRecebidos": "T",
             "lExibirPedidosCancelados": "F",
             "lExibirPedidosEncerrados": "F",
-            "lExibirPedidosRecParciais": "F",
-            "lExibirPedidosFatParciais": "F",
+            "lExibirPedidosRecParciais": "T",
+            "lExibirPedidosFatParciais": "T",
             "dDataInicial": data_inicio_default,
             "dDataFinal": data_fim_default,
             "lApenasAlterados": "F",
         }
+
         if kwargs.get("incremental") and kwargs.get("data_inicio") and kwargs.get("data_fim"):
             payload["dDataInicial"] = _date_omie(kwargs["data_inicio"])
             payload["dDataFinal"] = _date_omie(kwargs["data_fim"])
             payload["lApenasAlterados"] = "T"
+
         return payload
 
     def transform_data(self, raw_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Extrai pedidos_pesquisa e gera uma linha por pedido (cabeçalho)."""
+
+        def _str_val(v, n):
+            return str(v or "")[:n] if v is not None else None
+
         if raw_data.get("faultstring"):
             logger.warning(
                 f"Pedidos de Compra API retornou erro: {raw_data.get('faultstring')}. "
@@ -139,13 +155,24 @@ class PedidosCompraCollector(BaseCollector):
                 continue
             row = {
                 "cod_pedido": cod_ped[:50],
-                "cod_pedido_integracao": str(cab.get("cCodIntPed") or "")[:50],
-                "numero": str(cab.get("cNumero") or "")[:30],
-                "cod_fornecedor": str(cab.get("nCodFor") or "")[:50],
-                "data_previsao": str(cab.get("dDtPrevisao") or "")[:20],
-                "cod_conta_corrente": str(cab.get("nCodCC") or "")[:50],
-                "cod_projeto": str(cab.get("nCodProj") or "")[:50],
-                "observacao": str(cab.get("cObs") or "")[:65535] if cab.get("cObs") else None,
+                "cod_pedido_integracao": _str_val(cab.get("cCodIntPed"), 50),
+                "numero": _str_val(cab.get("cNumero"), 30),
+                "cod_fornecedor": _str_val(cab.get("nCodFor"), 50),
+                "cod_fornecedor_integracao": _str_val(cab.get("cCodIntFor"), 50),
+                "cnpj_cpf_fornecedor": _str_val(cab.get("cCnpjCpfFor"), 20),
+                "data_previsao": _str_val(cab.get("dDtPrevisao"), 20),
+                "cod_parc": _str_val(cab.get("cCodParc"), 10),
+                "qtde_parc": cab.get("nQtdeParc"),
+                "cod_categoria": _str_val(cab.get("cCodCateg"), 30),
+                "cod_comprador": _str_val(cab.get("nCodCompr"), 20),
+                "contato": _str_val(cab.get("cContato"), 120),
+                "numero_contrato": _str_val(cab.get("cContrato"), 30),
+                "numero_pedido_fornecedor": _str_val(cab.get("cNumPedido") or cab.get("cNumero"), 30),
+                "cod_conta_corrente": _str_val(cab.get("nCodCC"), 50),
+                "cod_conta_corrente_integracao": _str_val(cab.get("nCodIntCC"), 50),
+                "cod_projeto": _str_val(cab.get("nCodProj"), 50),
+                "observacao": (str(cab.get("cObs") or "")[:65535]) if cab.get("cObs") else None,
+                "observacao_interna": (str(cab.get("cObsInt") or "")[:65535]) if cab.get("cObsInt") else None,
                 "quantidade_itens": len(produtos),
             }
             out.append(row)

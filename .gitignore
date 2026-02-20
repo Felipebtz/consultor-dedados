@@ -5,6 +5,7 @@
 # Credenciais
 .env
 lille-422512-a12a0a3c757b.json
+gcp-key.json
 
 # Python
 __pycache__/

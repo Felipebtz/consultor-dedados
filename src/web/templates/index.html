@@ -182,6 +182,7 @@
             </div>
             
             <button class="refresh-btn" onclick="loadData()">🔄 Atualizar Dados</button>
+<button class="refresh-btn" id="btnRunColeta" onclick="runColeta()" style="margin-left: 8px;">🔄 Rodar coleta Omie</button>
         </div>
         
         <div id="error" style="display: none;" class="error"></div>
@@ -192,46 +193,71 @@
             const loading = document.getElementById('loading');
             const content = document.getElementById('content');
             const error = document.getElementById('error');
-            
+
             loading.style.display = 'block';
             content.style.display = 'none';
             error.style.display = 'none';
-            
+
             try {
-                // Carregar estatísticas
-                const statsResponse = await fetch('/api/stats');
-                const statsData = await statsResponse.json();
-                
-                if (statsData.success) {
-                    renderStats(statsData.data);
-                }
-                
-                // Carregar dados financeiros
-                const financialResponse = await fetch('/api/financial');
-                const financialData = await financialResponse.json();
-                
-                if (financialData.success) {
-                    renderFinancial(financialData.data);
-                }
-                
-                // Carregar métricas de tempo
-                const metricsResponse = await fetch('/api/metrics');
-                const metricsData = await metricsResponse.json();
-                
-                if (metricsData.success) {
-                    renderMetrics(metricsData.data);
-                }
-                
+                // Carregar as 3 APIs em paralelo (dashboard rápido)
+                const [statsRes, financialRes, metricsRes] = await Promise.all([
+                    fetch('/api/stats'),
+                    fetch('/api/financial'),
+                    fetch('/api/metrics')
+                ]);
+
+                const [statsData, financialData, metricsData] = await Promise.all([
+                    statsRes.json(),
+                    financialRes.json(),
+                    metricsRes.json()
+                ]);
+
+                if (statsData.success) renderStats(statsData.data);
+                if (financialData.success) renderFinancial(financialData.data);
+                if (metricsData.success) renderMetrics(metricsData.data);
+
                 loading.style.display = 'none';
                 content.style.display = 'block';
-                
             } catch (err) {
                 loading.style.display = 'none';
                 error.style.display = 'block';
                 error.textContent = 'Erro ao carregar dados: ' + err.message;
             }
         }
+        async function runColeta() {
+    const btn = document.getElementById('btnRunColeta');
+    const error = document.getElementById('error');
+
+    if (!btn) return;
+
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Coletando Dados ... ⏳";
+    error.style.display = 'none';
+
+    try {
+        const res = await fetch('/api/run-coleta', { method: 'POST' });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+            alert(data.message || 'Coleta concluída');
+            await loadData();
+        } else {
+            error.style.display = 'block';
+            error.textContent = data.message || 'Erro ao rodar coleta';
+        }
+
+    } catch (err) {
+        error.style.display = 'block';
+        error.textContent = 'Erro ao rodar coleta: ' + err.message;
+
+    } finally {
+        btn.disabled = false;
+        btn.textContent = label;
+    }
+}
         
+
         function renderStats(data) {
             const grid = document.getElementById('statsGrid');
             grid.innerHTML = '';
@@ -382,6 +408,7 @@
                 'ordem_servico_collect': '📋 Ordens de Serviço',
                 'contas_dre_collect': '📈 Contas DRE',
                 'pedido_vendas_collect': '🛒 Pedidos de Venda',
+                'pedidos_compra_collect': '📥 Pedidos de Compra',
                 'crm_oportunidades_collect': '🎯 CRM Oportunidades',
                 'etapas_faturamento_collect': '📌 Etapas Faturamento',
                 'produto_fornecedor_collect': '🏭 Produto x Fornecedor',

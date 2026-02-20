@@ -1,13 +1,17 @@
 """
 Aplicação Web Flask para Dashboard do Sistema de Coleta Omie.
 Lê do BigQuery quando GCP está configurado; senão lê do MySQL.
+Otimizado: cache curto (45s), contagens em paralelo, respostas leves.
 """
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, jsonify
 from src.config import Settings
 from src.database import DatabaseManager
 from src.bigquery import BigQueryManager
 from src.metrics import MetricsCollector
+from src.orchestrator import DataOrchestrator
 import logging
+import time
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -15,6 +19,24 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False
+
+# Cache em memória (TTL 45s) para dashboard rápido
+_CACHE_TTL = 45
+_cache = {}  # key -> (timestamp, value)
+
+def _cached(key):
+    if key in _cache:
+        ts, val = _cache[key]
+        if time.time() - ts < _CACHE_TTL:
+            return val
+    return None
+
+def _set_cache(key, value):
+    _cache[key] = (time.time(), value)
+
+# Headers para o browser cachear respostas (dashboard rápido)
+def _cache_headers():
+    return {"Cache-Control": "public, max-age=45"}
 
 # Inicializar: BigQuery se GCP configurado, senão MySQL
 settings = Settings()
@@ -31,103 +53,122 @@ else:
     db_manager = DatabaseManager(settings.database)
     _use_bigquery = False
 
+_executor = ThreadPoolExecutor(max_workers=20)
+TABLES_STATS = [
+    'clientes', 'produtos', 'servicos', 'categorias',
+    'contas_receber', 'contas_pagar', 'extrato',
+    'ordem_servico', 'contas_dre',
+    'pedido_vendas', 'pedidos_compra', 'crm_oportunidades', 'etapas_faturamento', 'produto_fornecedor',
+    'servico_resumo', 'vendas_resumo', 'nfse', 'nf_consultar'
+]
+
 
 @app.route('/')
 def index():
     """Página principal do dashboard."""
     return render_template('index.html')
+@app.route('/api/run-coleta', methods=['POST'])
+def run_coleta():
+    """Dispara a coleta Omie -> BigQuery. Síncrono; invalida cache ao terminar."""
+    try:
+        orch = DataOrchestrator(settings)
+        results = orch.run_collections(parallel=False)
+        orch.cleanup()
+        _cache.clear()
+        total = sum(r.get("records", 0) for r in results)
+        return jsonify({
+            "success": True,
+            "message": f"Coleta concluída. Total: {total} registros.",
+            "results": results
+        }), 200
+    except Exception as e:
+        logger.error(f"Erro ao rodar coleta: {str(e)}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 
 @app.route('/api/stats')
 def get_stats():
-    """Retorna estatísticas gerais do sistema."""
+    """Estatísticas gerais (cache 45s, contagens em paralelo)."""
+    cached = _cached("stats")
+    if cached is not None:
+        return jsonify(cached), 200, _cache_headers()
+
     try:
         stats = {}
-        
-        # Lista de tabelas (inclui faturamento e pedidos_compra)
-        tables = [
-            'clientes', 'produtos', 'servicos', 'categorias',
-            'contas_receber', 'contas_pagar', 'extrato',
-            'ordem_servico', 'contas_dre',
-            'pedido_vendas', 'pedidos_compra', 'crm_oportunidades', 'etapas_faturamento', 'produto_fornecedor',
-            'servico_resumo', 'vendas_resumo', 'nfse', 'nf_consultar'
-        ]
-        
-        # Conta registros em cada tabela
-        for table in tables:
+
+        def _count_one(table):
             try:
                 if _use_bigquery:
-                    stats[table] = db_manager.get_table_count(table)
-                else:
-                    result = db_manager.execute_query(f"SELECT COUNT(*) as total FROM {table}")
-                    stats[table] = result[0]['total'] if result else 0
+                    return table, db_manager.get_table_count(table)
+                r = db_manager.execute_query(f"SELECT COUNT(*) as total FROM {table}")
+                return table, (r[0]['total'] if r else 0)
             except Exception as e:
-                logger.warning(f"Erro ao contar registros em {table}: {str(e)}")
-                stats[table] = 0
-        
-        # Total geral (soma apenas contagens das tabelas)
+                logger.warning(f"Erro ao contar {table}: {str(e)}")
+                return table, 0
+
+        futures = {_executor.submit(_count_one, t): t for t in TABLES_STATS}
+        for fut in as_completed(futures):
+            table, count = fut.result()
+            stats[table] = count
+
         stats['total_geral'] = sum(v for k, v in stats.items() if k != 'total_geral')
-        
-        return jsonify({
-            'success': True,
-            'data': stats
-        })
+        out = {'success': True, 'data': stats}
+        _set_cache("stats", out)
+        return jsonify(out), 200, _cache_headers()
     except Exception as e:
         logger.error(f"Erro ao obter estatísticas: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/financial')
 def get_financial():
-    """Retorna dados financeiros."""
+    """Dados financeiros (cache 45s, duas queries em paralelo)."""
+    cached = _cached("financial")
+    if cached is not None:
+        return jsonify(cached), 200, _cache_headers()
+
     try:
         financial_data = {}
-        
-        # Contas a Receber
         tbl_cr = db_manager.table_ref("contas_receber") if _use_bigquery else "contas_receber"
-        try:
-            contas_receber = db_manager.execute_query(f"""
-                SELECT 
-                    COUNT(*) as total,
-                    SUM(valor_documento) as total_valor,
-                    SUM(valor_pago) as total_pago,
-                    SUM(saldo) as total_saldo
-                FROM {tbl_cr}
-            """)
-            financial_data['contas_receber'] = contas_receber[0] if contas_receber else {}
-        except Exception as e:
-            logger.warning(f"Erro ao buscar contas a receber: {str(e)}")
-            financial_data['contas_receber'] = {}
-        
-        # Contas a Pagar
         tbl_cp = db_manager.table_ref("contas_pagar") if _use_bigquery else "contas_pagar"
-        try:
-            contas_pagar = db_manager.execute_query(f"""
-                SELECT 
-                    COUNT(*) as total,
-                    SUM(valor_documento) as total_valor,
-                    SUM(valor_pago) as total_pago,
-                    SUM(saldo) as total_saldo
-                FROM {tbl_cp}
-            """)
-            financial_data['contas_pagar'] = contas_pagar[0] if contas_pagar else {}
-        except Exception as e:
-            logger.warning(f"Erro ao buscar contas a pagar: {str(e)}")
-            financial_data['contas_pagar'] = {}
-        
-        return jsonify({
-            'success': True,
-            'data': financial_data
-        })
+
+        def _query_cr():
+            try:
+                r = db_manager.execute_query(f"""
+                    SELECT COUNT(*) as total, SUM(valor_documento) as total_valor,
+                           SUM(valor_pago) as total_pago, SUM(saldo) as total_saldo
+                    FROM {tbl_cr}
+                """)
+                return 'contas_receber', (r[0] if r else {})
+            except Exception as e:
+                logger.warning(f"Erro contas a receber: {str(e)}")
+                return 'contas_receber', {}
+
+        def _query_cp():
+            try:
+                r = db_manager.execute_query(f"""
+                    SELECT COUNT(*) as total, SUM(valor_documento) as total_valor,
+                           SUM(valor_pago) as total_pago, SUM(saldo) as total_saldo
+                    FROM {tbl_cp}
+                """)
+                return 'contas_pagar', (r[0] if r else {})
+            except Exception as e:
+                logger.warning(f"Erro contas a pagar: {str(e)}")
+                return 'contas_pagar', {}
+
+        f1, f2 = _executor.submit(_query_cr), _executor.submit(_query_cp)
+        for k, v in [f1.result(), f2.result()]:
+            financial_data[k] = v
+
+        out = {'success': True, 'data': financial_data}
+        _set_cache("financial", out)
+        return jsonify(out), 200, _cache_headers()
     except Exception as e:
         logger.error(f"Erro ao obter dados financeiros: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/tables/<table_name>')
@@ -149,15 +190,13 @@ def get_table_data(table_name):
                 'error': 'Tabela não permitida'
             }), 400
         
-        # Buscar dados (limitado a 100 registros)
+        # Buscar dados (limitado a 50 para resposta rápida)
         tbl = db_manager.table_ref(table_name) if _use_bigquery else table_name
-        data = db_manager.execute_query(f"SELECT * FROM {tbl} LIMIT 100")
-        
-        return jsonify({
-            'success': True,
-            'data': data,
-            'count': len(data)
-        })
+        data = db_manager.execute_query(f"SELECT * FROM {tbl} LIMIT 50")
+
+        resp = jsonify({'success': True, 'data': data, 'count': len(data)})
+        resp.headers["Cache-Control"] = "public, max-age=30"
+        return resp
     except Exception as e:
         logger.error(f"Erro ao buscar dados da tabela {table_name}: {str(e)}")
         return jsonify({
@@ -168,10 +207,13 @@ def get_table_data(table_name):
 
 @app.route('/api/metrics')
 def get_metrics():
-    """Retorna métricas de tempo de coleta das APIs."""
+    """Métricas de coleta (cache 45s)."""
+    cached = _cached("metrics")
+    if cached is not None:
+        return jsonify(cached), 200, _cache_headers()
+
     try:
         tbl = db_manager.table_ref("api_metrics") if _use_bigquery else "api_metrics"
-        # Criar tabela de métricas se não existir
         try:
             db_manager.create_table('api_metrics', {
                 'id': 'BIGINT PRIMARY KEY AUTO_INCREMENT',
@@ -183,9 +225,8 @@ def get_metrics():
                 'created_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'
             })
         except Exception:
-            pass  # Tabela já existe
-        
-        # Buscar últimas métricas (últimas 24h); BigQuery usa TIMESTAMP_SUB
+            pass
+
         if _use_bigquery:
             metrics = db_manager.execute_query(f"""
                 SELECT 
@@ -243,19 +284,18 @@ def get_metrics():
                 )
             """)
         
-        return jsonify({
+        out = {
             'success': True,
             'data': {
                 'operations': metrics or [],
                 'last_execution': last_execution[0] if last_execution else {}
             }
-        })
+        }
+        _set_cache("metrics", out)
+        return jsonify(out), 200, _cache_headers()
     except Exception as e:
         logger.error(f"Erro ao obter métricas: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 if __name__ == '__main__':
