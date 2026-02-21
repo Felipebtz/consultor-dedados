@@ -6,6 +6,7 @@ import os
 import logging
 import json
 import re
+import uuid
 from datetime import datetime, date
 from decimal import Decimal
 from typing import Dict, List, Any, Optional
@@ -195,9 +196,14 @@ class BigQueryManager:
         for i in range(0, len(data), INSERT_BATCH_SIZE):
             chunk = data[i : i + INSERT_BATCH_SIZE]
             rows = []
+            id_col = next((c for c in columns if c.lower() == "id"), None)
             for record in chunk:
                 row = self._prepare_row(record, columns)
                 row = {k: v for k, v in row.items() if k in columns}
+                if id_col is not None:
+                    val = row.get(id_col)
+                    if val is None or val == "":
+                        row[id_col] = str(uuid.uuid4())
                 rows.append(row)
             if not rows:
                 continue

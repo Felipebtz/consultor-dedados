@@ -4,7 +4,7 @@ Lê do BigQuery quando GCP está configurado; senão lê do MySQL.
 Otimizado: cache curto (45s), contagens em paralelo, respostas leves.
 """
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 from src.config import Settings
 from src.database import DatabaseManager
 from src.bigquery import BigQueryManager
@@ -91,10 +91,11 @@ def run_coleta():
 
 @app.route('/api/stats')
 def get_stats():
-    """Estatísticas gerais (cache 45s, contagens em paralelo)."""
-    cached = _cached("stats")
-    if cached is not None:
-        return jsonify(cached), 200, _cache_headers()
+    """Estatísticas gerais (cache 45s, contagens em paralelo). Use ?refresh=1 para ignorar cache."""
+    if not request.args.get("refresh"):
+        cached = _cached("stats")
+        if cached is not None:
+            return jsonify(cached), 200, _cache_headers()
 
     try:
         stats = {}

@@ -201,7 +201,7 @@
             try {
                 // Carregar as 3 APIs em paralelo (dashboard rápido)
                 const [statsRes, financialRes, metricsRes] = await Promise.all([
-                    fetch('/api/stats'),
+                    fetch('/api/stats?refresh=1'),
                     fetch('/api/financial'),
                     fetch('/api/metrics')
                 ]);
