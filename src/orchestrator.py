@@ -1,7 +1,9 @@
 """
 Orquestrador principal para execução de coletas de dados.
 Suporta coleta full e incremental (janela de datas).
+Na Vercel só usa BigQuery (MySQL não existe em ambiente serverless).
 """
+import os
 import concurrent.futures
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
@@ -58,9 +60,19 @@ class DataOrchestrator:
         """
         self.settings = settings or Settings()
         self.api_client = OmieApiClient(self.settings.omie)
-        # BigQuery quando GCP configurado (.env: GOOGLE_APPLICATION_CREDENTIALS + GCP_PROJECT_ID + BIGQUERY_DATASET)
         gcp = self.settings.gcp
-        if gcp.GOOGLE_APPLICATION_CREDENTIALS and gcp.project_id and gcp.dataset_id:
+        _vercel = os.environ.get("VERCEL") == "1"
+        # Na Vercel não existe MySQL; só BigQuery. Localmente: BigQuery se configurado, senão MySQL.
+        if _vercel:
+            if gcp.GOOGLE_APPLICATION_CREDENTIALS and gcp.project_id and gcp.dataset_id:
+                self.db_manager = BigQueryManager(gcp)
+                logger.info("Usando BigQuery como destino (Vercel)")
+            else:
+                raise RuntimeError(
+                    "Na Vercel a coleta só funciona com BigQuery. "
+                    "Configure GCP_PROJECT_ID, BIGQUERY_DATASET e GOOGLE_APPLICATION_CREDENTIALS_JSON."
+                )
+        elif gcp.GOOGLE_APPLICATION_CREDENTIALS and gcp.project_id and gcp.dataset_id:
             logger.info("Usando BigQuery como destino (fluxo MySQL desativado)")
             self.db_manager = BigQueryManager(gcp)
         else:

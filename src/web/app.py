@@ -1,8 +1,12 @@
 """
 Aplicação Web Flask para Dashboard do Sistema de Coleta Omie.
-Lê do BigQuery quando GCP está configurado; senão lê do MySQL.
+Lê do BigQuery quando GCP está configurado; senão lê do MySQL (apenas em ambiente local).
+Na Vercel NÃO existe MySQL: usa só BigQuery ou stub (dados vazios) para evitar erro de conexão.
 Otimizado: cache curto (45s), contagens em paralelo, respostas leves.
 """
+import os
+import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, jsonify, request
 from src.config import Settings
@@ -10,8 +14,6 @@ from src.database import DatabaseManager
 from src.bigquery import BigQueryManager
 from src.metrics import MetricsCollector
 from src.orchestrator import DataOrchestrator
-import logging
-import time
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -38,10 +40,49 @@ def _set_cache(key, value):
 def _cache_headers():
     return {"Cache-Control": "public, max-age=45"}
 
-# Inicializar: BigQuery se GCP configurado, senão MySQL
+
+class _StubDbManager:
+    """
+    Stub quando na Vercel sem BigQuery disponível.
+    Na Vercel não existe MySQL (localhost:3306); este stub evita tentativa de conexão
+    e retorna dados vazios para o dashboard carregar sem erro.
+    """
+    def get_table_count(self, table_name: str) -> int:
+        return 0
+    def execute_query(self, query: str, params=None):
+        return []
+    def table_ref(self, table_name: str) -> str:
+        return table_name
+    def create_table(self, table_name: str, schema: dict) -> bool:
+        return True
+
+
+# Inicializar: na Vercel NUNCA usar MySQL; localmente BigQuery primeiro, senão MySQL
 settings = Settings()
 gcp = settings.gcp
-if gcp.GOOGLE_APPLICATION_CREDENTIALS and gcp.project_id and gcp.dataset_id:
+_vercel = os.environ.get("VERCEL") == "1"
+
+if _vercel:
+    # Vercel é serverless: não há MySQL. Usar só BigQuery ou stub.
+    if gcp.GOOGLE_APPLICATION_CREDENTIALS and gcp.project_id and gcp.dataset_id:
+        try:
+            db_manager = BigQueryManager(gcp)
+            _use_bigquery = True
+        except Exception as e:
+            logger.warning(
+                "BigQuery indisponível na Vercel (%s). Configure GOOGLE_APPLICATION_CREDENTIALS_JSON e Build step.",
+                e,
+            )
+            db_manager = _StubDbManager()
+            _use_bigquery = False
+    else:
+        logger.warning(
+            "Na Vercel só BigQuery é suportado (MySQL não existe). "
+            "Configure GCP_PROJECT_ID, BIGQUERY_DATASET e GOOGLE_APPLICATION_CREDENTIALS_JSON."
+        )
+        db_manager = _StubDbManager()
+        _use_bigquery = False
+elif gcp.GOOGLE_APPLICATION_CREDENTIALS and gcp.project_id and gcp.dataset_id:
     try:
         db_manager = BigQueryManager(gcp)
         _use_bigquery = True
