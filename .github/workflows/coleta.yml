@@ -43,6 +43,7 @@ jobs:
         env:
           OMIE_APP_KEY: ${{ secrets.OMIE_APP_KEY }}
           OMIE_APP_SECRET: ${{ secrets.OMIE_APP_SECRET }}
+          BASE_URL: ${{ secrets.BASE_URL }}
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           BIGQUERY_DATASET: ${{ secrets.BIGQUERY_DATASET }}
         run: python src/main.py
