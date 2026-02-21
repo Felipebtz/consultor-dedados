@@ -1,8 +1,10 @@
 """
 Gerenciador BigQuery: cria dataset/tabelas e insere dados da coleta Omie.
 Substitui o fluxo MySQL quando GOOGLE_APPLICATION_CREDENTIALS + GCP_PROJECT_ID + BIGQUERY_DATASET estão configurados.
+Suporta credenciais inline (GOOGLE_APPLICATION_CREDENTIALS_JSON) para Vercel/serverless.
 """
 import os
+import tempfile
 import logging
 import json
 import re
@@ -50,6 +52,32 @@ def _mysql_type_to_bigquery(mysql_type: str) -> str:
     return "STRING"
 
 
+def _resolve_credentials_path(gcp_settings) -> Optional[str]:
+    """
+    Retorna o caminho do arquivo de credenciais para GOOGLE_APPLICATION_CREDENTIALS.
+    Na Vercel o JSON vem em variável (GOOGLE_APPLICATION_CREDENTIALS_JSON ou valor inline);
+    grava em arquivo temporário para a lib Google auth conseguir ler.
+    Se o valor parecer JSON (começa com '{'), sempre grava em arquivo; não exige json.loads
+    válido (evita "File ... was not found" quando o JSON colado tem formatação diferente).
+    """
+    json_content = getattr(gcp_settings, "GOOGLE_APPLICATION_CREDENTIALS_JSON", None) or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+    path_value = getattr(gcp_settings, "GOOGLE_APPLICATION_CREDENTIALS", None) or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+
+    def _write_json_to_temp(content: str) -> str:
+        fd, path = tempfile.mkstemp(suffix=".json", prefix="gcp-credentials-")
+        try:
+            os.write(fd, content.encode("utf-8"))
+        finally:
+            os.close(fd)
+        return path
+
+    if json_content and isinstance(json_content, str) and json_content.strip().startswith("{"):
+        return _write_json_to_temp(json_content)
+    if path_value and isinstance(path_value, str) and path_value.strip().startswith("{"):
+        return _write_json_to_temp(path_value)
+    return path_value
+
+
 class BigQueryManager:
     """
     Gerencia dataset e tabelas no BigQuery; insere dados em lote.
@@ -65,10 +93,9 @@ class BigQueryManager:
             raise ValueError(
                 "BigQuery exige GCP_PROJECT_ID e BIGQUERY_DATASET no .env"
             )
-        if self.settings.GOOGLE_APPLICATION_CREDENTIALS:
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(
-                self.settings.GOOGLE_APPLICATION_CREDENTIALS
-            )
+        credentials_path = _resolve_credentials_path(self.settings)
+        if credentials_path:
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
         self._client = bigquery.Client(project=project)
         self._project = project
         self._dataset_id = dataset_id

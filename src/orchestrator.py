@@ -63,8 +63,9 @@ class DataOrchestrator:
         gcp = self.settings.gcp
         _vercel = os.environ.get("VERCEL") == "1"
         # Na Vercel não existe MySQL; só BigQuery. Localmente: BigQuery se configurado, senão MySQL.
+        _gcp_ok = bool((gcp.GOOGLE_APPLICATION_CREDENTIALS or gcp.GOOGLE_APPLICATION_CREDENTIALS_JSON) and gcp.project_id and gcp.dataset_id)
         if _vercel:
-            if gcp.GOOGLE_APPLICATION_CREDENTIALS and gcp.project_id and gcp.dataset_id:
+            if _gcp_ok:
                 self.db_manager = BigQueryManager(gcp)
                 logger.info("Usando BigQuery como destino (Vercel)")
             else:
@@ -72,7 +73,7 @@ class DataOrchestrator:
                     "Na Vercel a coleta só funciona com BigQuery. "
                     "Configure GCP_PROJECT_ID, BIGQUERY_DATASET e GOOGLE_APPLICATION_CREDENTIALS_JSON."
                 )
-        elif gcp.GOOGLE_APPLICATION_CREDENTIALS and gcp.project_id and gcp.dataset_id:
+        elif _gcp_ok:
             logger.info("Usando BigQuery como destino (fluxo MySQL desativado)")
             self.db_manager = BigQueryManager(gcp)
         else:

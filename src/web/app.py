@@ -62,9 +62,12 @@ settings = Settings()
 gcp = settings.gcp
 _vercel = os.environ.get("VERCEL") == "1"
 
+def _gcp_configured(gcp):
+    return (gcp.GOOGLE_APPLICATION_CREDENTIALS or gcp.GOOGLE_APPLICATION_CREDENTIALS_JSON) and gcp.project_id and gcp.dataset_id
+
 if _vercel:
     # Vercel é serverless: não há MySQL. Usar só BigQuery ou stub.
-    if gcp.GOOGLE_APPLICATION_CREDENTIALS and gcp.project_id and gcp.dataset_id:
+    if _gcp_configured(gcp):
         try:
             db_manager = BigQueryManager(gcp)
             _use_bigquery = True
@@ -82,7 +85,7 @@ if _vercel:
         )
         db_manager = _StubDbManager()
         _use_bigquery = False
-elif gcp.GOOGLE_APPLICATION_CREDENTIALS and gcp.project_id and gcp.dataset_id:
+elif _gcp_configured(gcp):
     try:
         db_manager = BigQueryManager(gcp)
         _use_bigquery = True

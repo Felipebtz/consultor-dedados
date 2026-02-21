@@ -9,6 +9,8 @@ class GcpSettings(BaseSettings):
     """Configurações Google Cloud (BigQuery e GCS)."""
     # Caminho absoluto do JSON da service account (BigQuery + GCS)
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None
+    # Conteúdo inline do JSON (Vercel: não há arquivo; use esta variável com o JSON completo)
+    GOOGLE_APPLICATION_CREDENTIALS_JSON: Optional[str] = None
     # Bucket GCS (ex.: gscbronze)
     GCS_BUCKET: str = "gscbronze"
     # BigQuery: projeto e dataset (.env: GCP_PROJECT_ID, BIGQUERY_DATASET)
